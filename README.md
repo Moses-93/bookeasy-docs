@@ -29,7 +29,7 @@
 | Web Framework | FastAPI |
 | ORM | SQLAlchemy 2.0 |
 | Database | PostgreSQL |
-| Cache / Broker | Redis |
+| Cache / Broker / Event Bus | Redis |
 | Task Queue | Celery |
 | Bot Framework | aiogram 3 |
 | DI Container | Dishka |

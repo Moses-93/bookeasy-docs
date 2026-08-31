@@ -24,17 +24,15 @@
 ## 2. Technology Stack
 
 | Category | Technology |
-|---|---|
+| --- | --- |
 | Runtime | Python 3.12 |
-| Web Framework | FastAPI |
-| ORM | SQLAlchemy 2.0 |
-| Database | PostgreSQL |
-| Cache / Broker / Event Bus | Redis |
+| Web & Real-Time APIs | FastAPI, Socket.IO |
+| Persistence & Storage | PostgreSQL, Cloudflare R2, SQLAlchemy 2.0 |
+| Cache, Broker, Event Bus | Redis |
 | Task Queue | Celery |
 | Bot Framework | aiogram 3 |
-| DI Container | Dishka |
 | Payment Gateway | WayForPay |
-| Error Tracking | Sentry SDK |
+| Observability | Sentry SDK |
 
 ---
 
@@ -46,6 +44,7 @@ The project follows Clean Architecture and Domain-Driven Design (DDD).
 ┌────────────────────────────────────────┐
 │          Presentation Layer            │
 │   REST API (FastAPI) | Telegram Bot    │
+│         WebSocket (Socket.IO)          │
 └──────────────┬─────────────────────────┘
                │ 
 ┌──────────────▼─────────────────────────┐
@@ -63,7 +62,7 @@ The project follows Clean Architecture and Domain-Driven Design (DDD).
 ┌──────────────┴─────────────────────────┐
 │         Infrastructure Layer           │
 │  PostgreSQL · Redis · Celery           │
-│  WayForPay · Notifiers (TG/SMS)        │
+│  WayForPay · Notifiers (TG/SMS/WS/PUSH)     │
 │  transports/http · Google OAuth        │
 │  JWT · Argon2 · Sentry                 │
 └────────────────────────────────────────┘
@@ -97,6 +96,7 @@ src/
 │   └── dto/                   
 ├── infrastructure/            
 │   ├── persistence/
+│   │   ├── object_storage/
 │   │   ├── postgres/          
 │   │   └── redis/             
 │   ├── messaging/
@@ -105,7 +105,8 @@ src/
 │   │   └── queues/celery/     
 │   ├── transports/http/       
 │   ├── billing/               
-│   ├── security/              
+│   ├── security/      
+│   ├── media/             
 │   └── telemetry/             
 ├── presentation/              
 │   ├── api/                   
@@ -155,6 +156,7 @@ classDiagram
     }
     class Client {
         +assign_master(master_id) void
+        +add_instagram(instagram) void
     }
     
     User <|-- Master
@@ -176,20 +178,35 @@ classDiagram
     Master *-- Contact : has
     Master *-- ProfileConfig : configures
 
+    %% ── Portfolio ────────────────────────────────
+    class Photo {
+        +shift_position(position) void
+    }
+    Master *-- "N" Photo : showcases
+
+    %% ── Expenses Aggregate ───────────────────────
+    class Expense {
+        +rename(title) void
+        +adjust_amount(amount) void
+        +shift_date(dt) void
+        +reclassify(category) void
+    }
+    Master *-- "N" Expense : incurs
+
     %% ── Scheduling & Services ───────────────────
     class Service {
         +reprice(price) void
         +rename(title) void
         +reschedule(duration) void
         +redescribe(description) void
+        +recolor(color) void
         +archive() void
     }
     class TimeSlot {
         +book() void
         +release() void
-        +withdraw() void
         +waste() void
-        +expire() void
+        +resize(duration) void
         +can_book(now) bool
         +is_due(now) bool
         +is_started(now) bool
@@ -222,12 +239,16 @@ classDiagram
     }
     class Subscription {
         +activate() void
+        +assign_token(token) void
         +renew(period: BillingPeriod) void
         +cancel() void
         +is_active() bool
+        +switch_plan(new_plan) void
+        +has_access(now) bool
     }
     class Invoice {
         +mark_as_paid() void
+        +void() void
         +is_paid() bool
         +is_open() bool
     }
@@ -333,3 +354,9 @@ The `claim_token` allows an anonymous client to view or cancel the booking withi
 - **Decision:** Use Redis Pub/Sub for internal events with deduplication guard by `event_id`.
 - **Rationale:** Lightweight event propagation between app processes and worker flows.
 - **Trade-off:** Best-effort / at-most-once delivery semantics (no replay log); consumers must stay idempotent and tolerant to delivery timing.
+
+### ADR-006: Single-Use Ticket Pattern for WebSocket Authentication
+
+- **Decision:** Authenticate WebSocket connections via short-lived single-use tickets with TTL requested via `POST /api/v1/auth/ws-ticket` and consumed atomically (`GETDEL`) in Redis during handshake.
+- **Rationale:** Reuses the existing HTTP authentication and permission pipeline, avoiding duplicated auth logic in the WebSocket transport.
+- **Trade-off:** Requires an initial HTTP POST roundtrip before opening the socket connection.
